@@ -3,8 +3,9 @@
 > Full-stack investment intelligence platform powered by Llama 3 (via Groq), real-time market data, and modern web technologies.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?logo=fastapi)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql)
+![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4-06B6D4?logo=tailwindcss)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
 
 ---
@@ -151,13 +152,14 @@ GROQ_API_KEY=gsk_your_groq_api_key_here
 - Holdings table with per-asset P&L
 - Summary cards (Total Value, Total P&L, Asset Count)
 
-### 📰 News
+### 📰 News & Sentiment
 - Aggregated financial news from RSS feeds
+- **Sentiment Analysis Widget** for market mood tracking
 - Color-coded category badges (Macro, Crypto, Tech, Commodities)
 - Live update indicator
 
 ### 🤖 AI Financial Advisor
-- Chat with Llama 3 (70B) via Groq
+- Chat with Llama 3 (70B) via Groq (LangChain integration)
 - Context-aware financial analysis
 - Risk disclaimers included
 
@@ -217,8 +219,8 @@ For full AWS EKS deployment, see [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.
 
 | Layer      | Technology                          |
 |------------|-------------------------------------|
-| Frontend   | Next.js 16, Tailwind CSS, Shadcn UI, Recharts |
-| Backend    | FastAPI, SQLModel, Alembic          |
+| Frontend   | Next.js 16, Tailwind CSS 4, Shadcn UI, Recharts, Framer Motion |
+| Backend    | FastAPI 0.109, SQLModel, Alembic    |
 | Database   | PostgreSQL 15, Neo4j 5              |
 | AI         | Llama 3 70B via Groq (LangChain)   |
 | Auth       | JWT (python-jose) + Bcrypt          |
