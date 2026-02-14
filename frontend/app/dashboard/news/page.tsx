@@ -40,7 +40,7 @@ const sourceTypes: Array<"market" | "social" | "blog"> = ["market", "social", "b
 export default function NewsPage() {
     const [news, setNews] = useState<NewsItem[]>([])
     const [loading, setLoading] = useState(true)
-    const [minRelevanceInput, setMinRelevanceInput] = useState("0.50")
+    const [minRelevanceInput, setMinRelevanceInput] = useState("0.30")
     const [onlyActionable, setOnlyActionable] = useState(true)
     const [selectedSources, setSelectedSources] = useState<Array<"market" | "social" | "blog">>(["market", "social", "blog"])
     const [query, setQuery] = useState("")
@@ -55,7 +55,6 @@ export default function NewsPage() {
         try {
             setLoading(true)
             const params = new URLSearchParams({
-                limit: "25",
                 min_relevance: minRelevance.toFixed(2),
                 only_actionable: String(onlyActionable),
             })

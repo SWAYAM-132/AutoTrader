@@ -11,22 +11,41 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U user -d autotraderx" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  neo4j:
-    image: neo4j:5
-    container_name: autotraderx_neo4j
+  backend:
+    build: ./backend
+    container_name: autotraderx_backend
     restart: always
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
-      NEO4J_dbms_memory_pagecache_size: 1G
-      NEO4J_dbms_memory_heap_initial__size: 1G
-      NEO4J_dbms_memory_heap_max__size: 1G
+      POSTGRES_SERVER: db
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-autotraderx}
+      SECRET_KEY: ${SECRET_KEY:-YOUR_SECRET_KEY_HERE_CHANGE_IN_PRODUCTION}
+      # CORS: allow frontend container and localhost
+      BACKEND_CORS_ORIGINS: '["http://localhost:3000", "http://frontend:3000"]'
     ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: autotraderx_frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      # Browser can access backend at localhost:8000 (public URL)
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
 
   adminer:
     image: adminer
@@ -38,5 +57,3 @@ services:
 
 volumes:
   postgres_data:
-  neo4j_data:
-  neo4j_logs:

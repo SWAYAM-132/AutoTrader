@@ -1,8 +1,9 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowUpRight, ArrowDownRight, TrendingUp, PieChart } from "lucide-react"
+import { ArrowUpRight, ArrowDownRight, TrendingUp, PieChart, Loader2 } from "lucide-react"
 import {
     ResponsiveContainer,
     PieChart as RechartsPie,
@@ -10,30 +11,59 @@ import {
     Cell,
     Tooltip,
 } from "recharts"
+import api from "@/lib/api"
 
-const holdings = [
-    { ticker: "AAPL", name: "Apple Inc.", shares: 15, avgCost: 175.00, currentPrice: 189.84, allocation: 25 },
-    { ticker: "NVDA", name: "NVIDIA Corp.", shares: 5, avgCost: 800.00, currentPrice: 878.36, allocation: 20 },
-    { ticker: "BTC", name: "Bitcoin", shares: 0.5, avgCost: 60000.00, currentPrice: 67234.00, allocation: 30 },
-    { ticker: "MSFT", name: "Microsoft", shares: 8, avgCost: 380.00, currentPrice: 415.50, allocation: 15 },
-    { ticker: "ETH", name: "Ethereum", shares: 5, avgCost: 3200.00, currentPrice: 3456.78, allocation: 10 },
-]
+type PortfolioItem = {
+    id: number
+    symbol: string
+    quantity: number
+    avg_cost: number
+    current_price: number
+    value: number
+    pnl: number
+    pnl_percent: number
+}
 
 const COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#22c55e", "#06b6d4"]
 
-const allocationData = holdings.map((h, i) => ({
-    name: h.ticker,
-    value: h.allocation,
-}))
-
 export default function PortfolioPage() {
-    const totalValue = holdings.reduce((sum, h) => sum + h.shares * h.currentPrice, 0)
-    const totalCost = holdings.reduce((sum, h) => sum + h.shares * h.avgCost, 0)
+    const [holdings, setHoldings] = useState<PortfolioItem[]>([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        async function fetchPortfolio() {
+            try {
+                const res = await api.get("/portfolio/")
+                setHoldings(res.data)
+            } catch (err) {
+                console.error("Failed to fetch portfolio:", err)
+            } finally {
+                setLoading(false)
+            }
+        }
+        fetchPortfolio()
+    }, [])
+
+    const totalValue = holdings.reduce((sum, h) => sum + h.value, 0)
+    const totalCost = holdings.reduce((sum, h) => sum + h.quantity * h.avg_cost, 0)
     const totalPnL = totalValue - totalCost
-    const totalPnLPct = ((totalPnL / totalCost) * 100).toFixed(2)
+    const totalPnLPct = totalCost > 0 ? ((totalPnL / totalCost) * 100).toFixed(2) : "0.00"
+
+    const allocationData = holdings.map((h) => ({
+        name: h.symbol,
+        value: h.value,
+    }))
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        )
+    }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 p-6 md:p-10">
             <h2 className="text-3xl font-bold tracking-tight">Portfolio</h2>
 
             {/* Summary Cards */}
@@ -66,86 +96,94 @@ export default function PortfolioPage() {
                 </Card>
             </div>
 
-            {/* Allocation + Holdings */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-                {/* Allocation Pie Chart */}
-                <Card className="col-span-3">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <PieChart className="h-4 w-4" /> Allocation
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <ResponsiveContainer width="100%" height={250}>
-                            <RechartsPie>
-                                <Pie
-                                    data={allocationData}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={100}
-                                    paddingAngle={3}
-                                    dataKey="value"
-                                >
-                                    {allocationData.map((_, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'hsl(var(--card))',
-                                        border: '1px solid hsl(var(--border))',
-                                        borderRadius: '8px',
-                                        color: 'hsl(var(--foreground))',
-                                    }}
-                                    formatter={(value?: number) => [`${value}%`, "Allocation"]}
-                                />
-                            </RechartsPie>
-                        </ResponsiveContainer>
-                        <div className="flex flex-wrap gap-3 justify-center mt-2">
-                            {allocationData.map((item, i) => (
-                                <div key={item.name} className="flex items-center gap-1.5 text-xs">
-                                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[i] }} />
-                                    {item.name} ({item.value}%)
-                                </div>
-                            ))}
-                        </div>
+            {holdings.length === 0 ? (
+                <Card className="border-white/10 bg-black/30">
+                    <CardContent className="py-16 text-center text-muted-foreground">
+                        No assets in portfolio. Add some from the Portfolio tab on the dashboard.
                     </CardContent>
                 </Card>
-
-                {/* Holdings Table */}
-                <Card className="col-span-4">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <TrendingUp className="h-4 w-4" /> Holdings
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-3">
-                            {holdings.map((h) => {
-                                const pnl = (h.currentPrice - h.avgCost) * h.shares
-                                const pnlPct = ((h.currentPrice - h.avgCost) / h.avgCost * 100).toFixed(2)
-                                const isPositive = pnl >= 0
-                                return (
-                                    <div key={h.ticker} className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors">
-                                        <div>
-                                            <p className="font-semibold">{h.ticker}</p>
-                                            <p className="text-xs text-muted-foreground">{h.shares} shares @ ${h.avgCost.toLocaleString()}</p>
+            ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                    {/* Allocation Pie Chart */}
+                    <Card className="col-span-3">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <PieChart className="h-4 w-4" /> Allocation
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <ResponsiveContainer width="100%" height={250}>
+                                <RechartsPie>
+                                    <Pie
+                                        data={allocationData}
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={60}
+                                        outerRadius={100}
+                                        paddingAngle={3}
+                                        dataKey="value"
+                                    >
+                                        {allocationData.map((_, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'hsl(var(--card))',
+                                            border: '1px solid hsl(var(--border))',
+                                            borderRadius: '8px',
+                                            color: 'hsl(var(--foreground))',
+                                        }}
+                                        formatter={(value: any) => [`$${Number(value).toFixed(2)}`, "Value"]}
+                                    />
+                                </RechartsPie>
+                            </ResponsiveContainer>
+                            <div className="flex flex-wrap gap-3 justify-center mt-2">
+                                {allocationData.map((item, i) => {
+                                    const pct = totalValue > 0 ? ((item.value / totalValue) * 100).toFixed(1) : "0"
+                                    return (
+                                        <div key={item.name} className="flex items-center gap-1.5 text-xs">
+                                            <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                                            {item.name} ({pct}%)
                                         </div>
-                                        <div className="text-right">
-                                            <p className="font-semibold">${(h.shares * h.currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                                            <div className={`flex items-center gap-1 text-xs justify-end ${isPositive ? "text-green-500" : "text-red-500"}`}>
-                                                {isPositive ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                                                {isPositive ? "+" : ""}${pnl.toFixed(2)} ({pnlPct}%)
+                                    )
+                                })}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Holdings Table */}
+                    <Card className="col-span-4">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <TrendingUp className="h-4 w-4" /> Holdings
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-3">
+                                {holdings.map((h) => {
+                                    const isPositive = h.pnl >= 0
+                                    return (
+                                        <div key={h.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors">
+                                            <div>
+                                                <p className="font-semibold">{h.symbol}</p>
+                                                <p className="text-xs text-muted-foreground">{h.quantity} shares @ ${h.avg_cost.toLocaleString()}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="font-semibold">${h.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                                <div className={`flex items-center gap-1 text-xs justify-end ${isPositive ? "text-green-500" : "text-red-500"}`}>
+                                                    {isPositive ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                                                    {isPositive ? "+" : ""}${h.pnl.toFixed(2)} ({h.pnl_percent.toFixed(2)}%)
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+                                    )
+                                })}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
         </div>
     )
 }
