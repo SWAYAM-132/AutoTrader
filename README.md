@@ -54,7 +54,7 @@ The easiest way to run the full application is using Docker Compose.
 ### 1. Clone & Enter
 
 ```bash
-git clone https://github.com/your-username/AutoTraderX.git
+git clone https://github.com/SWAYAM-132/AutoTrader.git
 cd AutoTraderX
 ```
 
