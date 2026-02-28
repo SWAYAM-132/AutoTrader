@@ -33,13 +33,15 @@ class Settings(BaseSettings):
             )
         return self
 
-    # Neo4j
-    NEO4J_URI: str = "bolt://localhost:7687"
-    NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str = "password"
+    # ChromaDB (Vector Store for RAG)
+    CHROMA_HOST: str = "localhost"
+    CHROMA_PORT: int = 8001
 
-    # AI
+    # AI / LLM
+    LLM_PROVIDER: str = "groq"  # "groq" or "huggingface"
     GROQ_API_KEY: str = ""
+    HF_TOKEN: str = ""
+    HF_FINE_TUNED_MODEL: str = "Swayam132/autotraderx-qlora-adapter"
 
     class Config:
         case_sensitive = True

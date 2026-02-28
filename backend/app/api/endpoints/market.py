@@ -4,57 +4,13 @@ from typing import Any
 import httpx
 from fastapi import APIRouter
 
+from app.core.ticker_mapping import TICKER_MAPPING, normalize_crypto_symbol
 from app.services.coingecko import TICKER_TO_COINGECKO, coingecko_service
 from app.services.news import news_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-TICKER_MAPPING = {
-    # Tech
-    "BTC": ["BITCOIN", "BTC", "CRYPTO"],
-    "ETH": ["ETHEREUM", "ETH", "CRYPTO"],
-    "AAPL": ["APPLE", "AAPL", "IPHONE", "MACBOOK", "IPAD"],
-    "TSLA": ["TESLA", "TSLA", "ELON MUSK", "EV"],
-    "NVDA": ["NVIDIA", "NVDA", "GPU", "AI CHIP", "CUDA"],
-    "MSFT": ["MICROSOFT", "MSFT", "AZURE", "OPENAI", "COPILOT"],
-    "AMZN": ["AMAZON", "AMZN", "AWS", "PRIME"],
-    "GOOGL": ["GOOGLE", "ALPHABET", "GOOGL", "GEMINI", "WAYMO"],
-    "META": ["FACEBOOK", "META", "INSTAGRAM", "ZUCKERBERG", "WHATSAPP", "THREADS"],
-    # Financials
-    "JPM": ["JPMORGAN", "JPM", "CHASE"],
-    "V": ["VISA"],
-    "MA": ["MASTERCARD"],
-    "GS": ["GOLDMAN SACHS", "GS"],
-    # Healthcare
-    "LLY": ["ELI LILLY", "LLY", "MOUNJARO"],
-    "JNJ": ["JOHNSON", "JNJ"],
-    "UNH": ["UNITEDHEALTH", "UNH"],
-    # Consumer / Retail
-    "WMT": ["WALMART", "WMT"],
-    "COST": ["COSTCO", "COST"],
-    # Crypto
-    "SOL": ["SOLANA", "SOL"],
-    "XRP": ["RIPPLE", "XRP"],
-    "DOGE": ["DOGECOIN", "DOGE"],
-    "ADA": ["CARDANO", "ADA"],
-    # Energy
-    "XOM": ["EXXON", "XOM"],
-    "CVX": ["CHEVRON", "CVX"],
-    # Indices (for sentiment matching)
-    "SPY": ["S&P 500", "SPY", "S&P"],
-    "QQQ": ["NASDAQ", "QQQ"],
-}
-
-
-def _normalize_crypto_symbol(symbol: str) -> str:
-    """Strip -USD / -USDT / /USDT suffixes to get a bare crypto ticker."""
-    s = symbol.upper()
-    for suffix in ("-USD", "-USDT", "/USDT", "/USD"):
-        if s.endswith(suffix):
-            s = s[: -len(suffix)]
-    return s
 
 
 async def _fetch_stock_price_yahoo(symbol: str) -> tuple[float, float]:
@@ -103,7 +59,7 @@ async def get_sentiment(symbol: str) -> Any:
     price_change = 0.0
 
     # Normalize crypto tickers: BTC-USD → BTC, ETH-USD → ETH
-    bare_symbol = _normalize_crypto_symbol(symbol_upper)
+    bare_symbol = normalize_crypto_symbol(symbol_upper)
 
     if bare_symbol in TICKER_TO_COINGECKO:
         # Crypto → CoinGecko (free, reliable)

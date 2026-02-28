@@ -5,7 +5,7 @@ import { TickerCard } from "@/components/TickerCard"
 
 import { WatchlistSidebar } from "@/components/WatchlistSidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Activity, Globe, Wallet, Zap, Loader2 } from "lucide-react"
+import { Activity, Globe, Wallet, Zap, Loader2, TrendingUp } from "lucide-react"
 import { NewsFeed } from "@/components/NewsFeed"
 import { useEffect, useState } from "react"
 import dynamic from "next/dynamic"
@@ -21,11 +21,6 @@ const MarketSummary = dynamic(() => import("@/components/MarketSummary").then(mo
     loading: () => <div className="h-[200px] w-full bg-card/40 animate-pulse rounded-xl" />,
 })
 
-const MarketHeatmap = dynamic(() => import('@/components/MarketHeatmap').then(mod => mod.MarketHeatmap), {
-    ssr: false,
-    loading: () => <div className="h-[400px] w-full bg-card/40 animate-pulse rounded-xl border border-white/5" />,
-})
-
 const PortfolioView = dynamic(() => import("@/components/PortfolioView").then(mod => mod.PortfolioView), {
     ssr: false,
     loading: () => <div className="h-[400px] bg-card/40 animate-pulse rounded-xl" />,
@@ -37,7 +32,7 @@ const ChatInterface = dynamic(() => import("@/components/chat-interface").then(m
 })
 
 // Symbols to fetch for the Top Movers section
-const TOP_MOVER_SYMBOLS = ["BTC-USD", "ETH-USD", "NVDA", "SPY", "GC=F"] // Added SPY/Gold for predictions
+const TOP_MOVER_SYMBOLS = ["BTC-USD", "ETH-USD", "NVDA", "SPY", "GC=F"]
 
 interface TickerData {
     symbol: string
@@ -94,23 +89,28 @@ export default function DashboardPage() {
     async function fetchDashboardData() {
         setLoading(true)
         try {
-            // 1. Fetch Sentiment/Price Data
-            const results = await Promise.allSettled(
-                TOP_MOVER_SYMBOLS.map((sym) => api.get(`/market/sentiment/${sym}`))
-            )
+            // Fetch sentiment + news IN PARALLEL for faster loading
+            const [sentimentResults, newsRes] = await Promise.all([
+                Promise.allSettled(
+                    TOP_MOVER_SYMBOLS.map((sym) => api.get(`/market/sentiment/${sym}`))
+                ),
+                api.get("/news/latest").catch(() => ({ data: [] })),
+            ])
 
+            // Process sentiment results
             const tickers: TickerData[] = []
             const sentimentMap: Record<string, any> = {}
 
-            for (const result of results) {
+            for (const result of sentimentResults) {
                 if (result.status === "fulfilled") {
                     const d = result.value.data
                     const isPositive = d.change_percent >= 0
+                    const dollarChange = Math.abs(d.price * d.change_percent / 100)
                     tickers.push({
                         symbol: d.symbol,
                         name: SYMBOL_NAMES[d.symbol] || d.symbol,
                         price: `$${d.price.toLocaleString()}`,
-                        change: `${isPositive ? "+" : ""}$${Math.abs(d.change * d.change_percent / 100).toFixed(2)}`, // Approx change val
+                        change: `${isPositive ? "+" : "-"}$${dollarChange.toFixed(2)}`,
                         changePercent: `${Math.abs(d.change_percent).toFixed(2)}%`,
                         isPositive,
                         changeVal: d.change_percent,
@@ -122,13 +122,11 @@ export default function DashboardPage() {
             }
             setTickerData(tickers)
 
-            // 2. Derive Predictions from Data
-            // BTC Prediction
+            // Derive Predictions
             const btcData = sentimentMap["BTC-USD"]
             const btcProb = btcData ? Math.min(Math.max(btcData.score * 100, 10), 95) : 50
             const btcTrend = btcData ? btcData.change_percent : 0
 
-            // SPY Prediction
             const spyData = sentimentMap["SPY"]
             const spyProb = spyData ? Math.min(Math.max(spyData.score * 100, 15), 90) : 60
             const spyTrend = spyData ? spyData.change_percent : 0
@@ -148,7 +146,6 @@ export default function DashboardPage() {
                 },
             ])
 
-            // Global Event (Gold/Oil)
             const goldData = sentimentMap["GC=F"]
             const goldProb = goldData ? Math.min(Math.max(goldData.score * 100, 20), 85) : 45
             setGlobalEvents([
@@ -160,10 +157,9 @@ export default function DashboardPage() {
                 }
             ])
 
-            // 3. Fetch News
-            const newsRes = await api.get("/news/latest")
-            if (newsRes.data) {
-                const items = newsRes.data.slice(0, 3).map((n: any) => ({
+            // Process news results
+            if (newsRes.data && newsRes.data.length > 0) {
+                const items = newsRes.data.slice(0, 5).map((n: any) => ({
                     title: n.title,
                     summary: n.summary,
                     source: n.source,
@@ -191,7 +187,6 @@ export default function DashboardPage() {
 
                 <Tabs defaultValue="market" className="space-y-8">
                     <TabsList className="bg-transparent border-b border-white/10 w-full justify-start h-auto p-0 gap-6 rounded-none">
-                        {/* Tabs Triggers... reused existing classes */}
                         <TabsTrigger value="market" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-0 py-3 text-muted-foreground data-[state=active]:text-foreground font-medium text-sm flex items-center gap-2">
                             <Globe className="h-4 w-4" /> Market Overview
                         </TabsTrigger>
@@ -208,12 +203,35 @@ export default function DashboardPage() {
 
                     {/* MARKET TAB */}
                     <TabsContent value="market" className="space-y-8 animate-in fade-in duration-500">
+                        {/* Top Movers Row */}
+                        <div>
+                            <div className="flex items-center gap-2 mb-4">
+                                <TrendingUp className="h-5 w-5 text-primary" />
+                                <h3 className="text-xl font-bold">Top Movers</h3>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                                {loading ? (
+                                    Array.from({ length: 5 }).map((_, i) => (
+                                        <div key={i} className="h-[120px] bg-card/40 animate-pulse rounded-xl border border-white/5" />
+                                    ))
+                                ) : tickerData.length > 0 ? (
+                                    tickerData.map(t => (
+                                        <TickerCard key={t.symbol} {...t} data={[
+                                            { value: 100 },
+                                            { value: t.isPositive ? 105 : 95 },
+                                            { value: t.isPositive ? 110 : 90 }
+                                        ]} />
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-muted-foreground col-span-5 text-center py-4">No ticker data available</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Predictions + News Grid */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                             <div className="lg:col-span-2 space-y-6">
-                                <h3 className="text-xl font-bold">S&P 500 Performance</h3>
-                                <MarketHeatmap />
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <PredictionMarketWidget
                                         title="Market Predictions"
                                         items={predictions.length > 0 ? predictions : [
@@ -229,26 +247,8 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
-                            {/* Sidebar: Tickers & News */}
+                            {/* Sidebar: News */}
                             <div className="space-y-6">
-                                <h3 className="text-xl font-bold">Top Movers</h3>
-                                <div className="space-y-4">
-                                    {loading ? (
-                                        <div className="flex items-center justify-center py-8">
-                                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                                        </div>
-                                    ) : tickerData.length > 0 ? (
-                                        tickerData
-                                            .filter(t => ["BTC-USD", "ETH-USD", "NVDA"].includes(t.symbol))
-                                            .map(t => <TickerCard key={t.symbol} {...t} data={[
-                                                { value: 100 },
-                                                { value: t.isPositive ? 105 : 95 },
-                                                { value: t.isPositive ? 110 : 90 }
-                                            ]} />)
-                                    ) : (
-                                        <p className="text-sm text-muted-foreground text-center py-4">No ticker data available</p>
-                                    )}
-                                </div>
                                 <MarketSummary items={newsItems.length > 0 ? newsItems : [
                                     { title: "Loading news...", summary: "Fetching latest market updates...", source: "System", time: "Now" }
                                 ]} />

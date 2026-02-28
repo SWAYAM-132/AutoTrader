@@ -3,24 +3,50 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
-# ─── Optional ChromaDB / Sentence-Transformers ──────────────────────────────────
-# If chromadb and sentence_transformers are installed, use them for proper
-# vector-based retrieval. Otherwise fall back to in-memory TF-IDF.
+# ─── ChromaDB Client ─────────────────────────────────────────────────────────
+# Prefer HTTP client (persistent, Docker service) over in-memory.
+VECTOR_DB_AVAILABLE = False
+_collection = None
+
 try:
     import chromadb
-    from chromadb.config import Settings as ChromaSettings
 
-    _chroma_client = chromadb.Client(ChromaSettings(anonymized_telemetry=False))
-    _collection = _chroma_client.get_or_create_collection(
-        name="autotraderx_news",
-        metadata={"hnsw:space": "cosine"},
-    )
-    VECTOR_DB_AVAILABLE = True
-    logger.info("ChromaDB vector store initialized successfully.")
+    # Try HTTP client first (Docker ChromaDB service)
+    try:
+        _chroma_client = chromadb.HttpClient(
+            host=settings.CHROMA_HOST,
+            port=settings.CHROMA_PORT,
+        )
+        _chroma_client.heartbeat()  # Test connection
+        _collection = _chroma_client.get_or_create_collection(
+            name="autotraderx_knowledge",
+            metadata={"hnsw:space": "cosine"},
+        )
+        VECTOR_DB_AVAILABLE = True
+        logger.info(
+            "ChromaDB HTTP client connected at %s:%s (persistent mode)",
+            settings.CHROMA_HOST, settings.CHROMA_PORT,
+        )
+    except Exception as http_err:
+        logger.warning("ChromaDB HTTP connection failed (%s), falling back to in-memory", http_err)
+        # Fallback to in-memory client
+        try:
+            from chromadb.config import Settings as ChromaSettings
+            _chroma_client = chromadb.Client(ChromaSettings(anonymized_telemetry=False))
+            _collection = _chroma_client.get_or_create_collection(
+                name="autotraderx_knowledge",
+                metadata={"hnsw:space": "cosine"},
+            )
+            VECTOR_DB_AVAILABLE = True
+            logger.info("ChromaDB in-memory client initialized (non-persistent)")
+        except Exception as mem_err:
+            logger.error("ChromaDB in-memory also failed: %s", mem_err)
+
 except ImportError:
-    VECTOR_DB_AVAILABLE = False
     logger.warning(
         "chromadb not installed — RAG will use basic in-memory search. "
         "Install with: pip install chromadb sentence-transformers"
@@ -60,6 +86,95 @@ class RAGService:
     def _content_hash(self, text: str) -> str:
         return hashlib.md5(text.encode("utf-8")).hexdigest()
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Return statistics about the RAG store."""
+        if VECTOR_DB_AVAILABLE and _collection is not None:
+            count = _collection.count()
+            # Get a sample of recent documents
+            sample = []
+            if count > 0:
+                try:
+                    result = _collection.peek(limit=min(5, count))
+                    if result and result.get("documents"):
+                        for i, doc in enumerate(result["documents"]):
+                            meta = result["metadatas"][i] if result.get("metadatas") else {}
+                            sample.append({
+                                "content_preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                                "metadata": meta,
+                            })
+                except Exception as e:
+                    logger.warning("Error peeking ChromaDB: %s", e)
+
+            return {
+                "backend": "chromadb",
+                "persistent": "http" in str(type(_chroma_client)).lower(),
+                "collection": "autotraderx_knowledge",
+                "document_count": count,
+                "sample_documents": sample,
+            }
+        else:
+            return {
+                "backend": "in-memory",
+                "persistent": False,
+                "document_count": len(self._documents),
+                "sample_documents": [
+                    {
+                        "content_preview": d.get("content", "")[:200],
+                        "metadata": d.get("metadata", {}),
+                    }
+                    for d in self._documents[:5]
+                ],
+            }
+
+    def get_documents(self, limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+        """Return paginated list of all documents in the RAG store."""
+        if VECTOR_DB_AVAILABLE and _collection is not None:
+            total = _collection.count()
+            if total == 0:
+                return {"total": 0, "limit": limit, "offset": offset, "documents": []}
+
+            try:
+                # ChromaDB get() supports limit and offset
+                result = _collection.get(
+                    limit=limit,
+                    offset=offset,
+                    include=["documents", "metadatas"],
+                )
+                documents = []
+                if result and result.get("documents"):
+                    for i, doc in enumerate(result["documents"]):
+                        meta = result["metadatas"][i] if result.get("metadatas") else {}
+                        documents.append({
+                            "id": result["ids"][i] if result.get("ids") else None,
+                            "content": doc,
+                            "metadata": meta,
+                        })
+
+                return {
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "documents": documents,
+                }
+            except Exception as e:
+                logger.error("Error getting ChromaDB documents: %s", e)
+                return {"total": total, "limit": limit, "offset": offset, "documents": [], "error": str(e)}
+        else:
+            total = len(self._documents)
+            page = self._documents[offset:offset + limit]
+            return {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "documents": [
+                    {
+                        "content": d.get("content", ""),
+                        "metadata": d.get("metadata", {}),
+                    }
+                    for d in page
+                ],
+            }
+
     def ingest(self, docs: List[Dict[str, Any]]):
         """
         Ingest documents from n8n or other sources.
@@ -68,7 +183,7 @@ class RAGService:
         if not docs:
             return
 
-        if VECTOR_DB_AVAILABLE:
+        if VECTOR_DB_AVAILABLE and _collection is not None:
             ids = []
             documents = []
             metadatas = []
@@ -136,9 +251,41 @@ class RAGService:
                 len(docs), len(self._documents),
             )
 
+    def ingest_news_from_service(self):
+        """Pull latest news from the news service and ingest into RAG store."""
+        try:
+            from app.services.news import news_service
+            news_items = news_service.fetch_latest_news(min_relevance=0.15)
+
+            if not news_items:
+                logger.info("RAG: No news items to ingest")
+                return 0
+
+            docs = []
+            for item in news_items:
+                docs.append({
+                    "content": f"{item.get('summary', '')}",
+                    "metadata": {
+                        "title": item.get("title", ""),
+                        "source": item.get("source", ""),
+                        "url": item.get("link", ""),
+                        "published_at": str(item.get("published_at", "")),
+                        "sentiment": item.get("sentiment", "Neutral"),
+                        "relevance_score": str(item.get("relevance_score", 0)),
+                    },
+                })
+
+            self.ingest(docs)
+            logger.info("RAG: Auto-ingested %d news articles", len(docs))
+            return len(docs)
+
+        except Exception as e:
+            logger.error("RAG auto-ingest failed: %s", e)
+            return 0
+
     def retrieve(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Retrieve top-k documents relevant to the query."""
-        if VECTOR_DB_AVAILABLE:
+        if VECTOR_DB_AVAILABLE and _collection is not None:
             return self._retrieve_chromadb(query, k)
         return self._retrieve_fallback(query, k)
 

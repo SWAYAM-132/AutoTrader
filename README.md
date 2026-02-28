@@ -1,150 +1,99 @@
-# 🚀 AutoTraderX — AI-Powered Investment Platform
+# AutoTraderX
 
-> Full-stack investment intelligence platform powered by Llama 3 (via Groq), real-time market data, and modern web technologies.
+An AI-powered financial trading assistant with real-time market data, sentiment analysis, and an intelligent chatbot advisor.
 
-![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688?logo=fastapi)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql)
-![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4-06B6D4?logo=tailwindcss)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
-
----
-
-## 📁 Project Structure
+## Architecture
 
 ```
 AutoTraderX/
-├── backend/                 # FastAPI REST API
+├── backend/               # FastAPI + PostgreSQL + ChromaDB
 │   ├── app/
-│   │   ├── api/             # Route handlers
-│   │   ├── core/            # Config, security, LLM client
-│   │   ├── db/              # Database session & seeders
-│   │   ├── models/          # SQLModel schemas
-│   │   └── services/        # Business logic (market data, news, AI advisor)
-│   ├── alembic/             # Database migrations
+│   │   ├── api/           # REST endpoints (auth, market, news, advisor, db)
+│   │   ├── core/          # Config, LLM, security, ticker mappings
+│   │   ├── db/            # Database session & seed data
+│   │   ├── models/        # SQLModel ORM models
+│   │   └── services/      # Business logic (news, market, RAG, advisor)
+│   ├── fine_tuning/       # QLoRA fine-tuning scripts (GPU required)
 │   ├── Dockerfile
 │   └── requirements.txt
-├── frontend/                # Next.js 15 + Tailwind + Shadcn UI
-│   ├── app/                 # App Router (Dashboard, Market, Portfolio)
-│   ├── components/          # Reusable UI components
-│   ├── lib/                 # API client, utilities
-│   ├── Dockerfile
-│   └── package.json
-├── k8s/                     # Kubernetes manifests
-├── docker-compose.yml       # Full stack deployment (Frontend + Backend + DB)
-└── README.md
+├── frontend/              # Next.js 14 dashboard
+│   ├── app/               # Pages (dashboard, login, signup)
+│   ├── components/        # UI components (chat, portfolio, news, etc.)
+│   ├── lib/               # API client
+│   └── Dockerfile
+├── docker-compose.yml     # Full stack orchestration
+└── k8s/                   # Kubernetes deployment configs
 ```
 
----
-
-## ✅ Prerequisites
-
-- **Docker Desktop** (Recommended for easiest deployment)
-- OR
-- **Node.js** 20+
-- **Python** 3.12+
-- **PostgreSQL** 15+
-
----
-
-## 🏃 Quick Start (Docker)
-
-The easiest way to run the full application is using Docker Compose.
-
-### 1. Clone & Enter
+## Quick Start (Docker)
 
 ```bash
-git clone https://github.com/SWAYAM-132/AutoTrader.git
-cd AutoTraderX
+# Clone and start all services
+git clone <repo-url> && cd AutoTraderX
+
+# Configure environment
+cp backend/.env.example backend/.env
+# Edit backend/.env with your GROQ_API_KEY
+
+# Build and start everything
+docker compose up --build -d
+
+# Check all services are running
+docker compose ps
 ```
 
-### 2. Configure Environment
+### Services
 
-Create `backend/.env` with your API keys:
+| Service    | URL                          | Description              |
+|------------|------------------------------|--------------------------|
+| Frontend   | http://localhost:3000         | Next.js dashboard        |
+| Backend    | http://localhost:8000         | FastAPI REST API          |
+| API Docs   | http://localhost:8000/docs    | Swagger UI               |
+| Adminer    | http://localhost:9090         | Database admin panel      |
+| ChromaDB   | http://localhost:8001         | Vector store (RAG)        |
 
-```env
-SECRET_KEY=change-this-to-a-secure-random-string
-GROQ_API_KEY=gsk_your_groq_api_key_here
-POSTGRES_PASSWORD=password
-```
+### Key API Endpoints
 
-### 3. Start Application
+| Endpoint                          | Method | Description                    |
+|-----------------------------------|--------|--------------------------------|
+| `/api/v1/health`                  | GET    | Health check                   |
+| `/api/v1/auth/login`              | POST   | Login (OAuth2)                 |
+| `/api/v1/auth/signup`             | POST   | User registration              |
+| `/api/v1/market/sentiment/{sym}`  | GET    | Price + sentiment for ticker   |
+| `/api/v1/news/latest`             | GET    | Latest financial news          |
+| `/api/v1/advisor/chat`            | POST   | AI advisor chat (auth required)|
+| `/api/v1/db/tables`              | GET    | List database tables           |
+| `/api/v1/db/tables/{name}`        | GET    | View table data (paginated)    |
+| `/api/v1/db/rag/stats`           | GET    | RAG vector store statistics    |
+
+## Features
+
+- **AI Financial Advisor** — Chat-based advisor powered by LLaMA 3 via Groq
+- **RAG Knowledge Base** — ChromaDB vector store with sentence-transformers embeddings
+- **Real-time Market Data** — Prices from Yahoo Finance & CoinGecko
+- **News Aggregation** — RSS feeds from 13+ financial news sources with sentiment analysis
+- **Portfolio Management** — Track holdings with real-time P&L
+- **QLoRA Fine-Tuning** — Scripts to fine-tune LLMs on financial advisory data
+
+## Fine-Tuning (QLoRA)
+
+See [backend/fine_tuning/README.md](backend/fine_tuning/README.md) for instructions on fine-tuning the LLM using QLoRA with GPU.
+
+## Development
 
 ```bash
-docker-compose up -d --build
-```
-
-### 4. Access App
-
-| Service   | URL                       | Description               |
-|-----------|---------------------------|---------------------------|
-| Frontend  | http://localhost:3000     | Main Web Application      |
-| Backend   | http://localhost:8000/docs| API Documentation         |
-| Adminer   | http://localhost:9090     | Database Management       |
-
----
-
-## 🛠️ Manual Setup (Dev Mode)
-
-If you prefer running services individually without Docker:
-
-### Backend
-```bash
+# Backend (local development)
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# Ensure you have a local PostgreSQL running
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
+uvicorn app.main:app --reload
 
-### Frontend
-```bash
+# Frontend (local development)
 cd frontend
 npm install
 npm run dev
-# Open http://localhost:3000
 ```
 
----
+## Deployment
 
-## 🧩 Features
-
-### 📊 Dashboard
-- **Live Market Data**: Real-time ticker updates and heatmaps
-- **AI Predictions**: Sentiment-driven market predictions
-- **News Feed**: Aggregated financial news with AI summaries
-
-### 📈 Market Analysis
-- **Interactive Charts**: Historical price data for stocks and crypto
-- **Live Watchlist**: Track your favorite assets
-- **Sentiment Scoring**: Real-time bullish/bearish indicators
-
-### 🤖 AI Financial Advisor
-- **Chat Interface**: Context-aware queries about market trends
-- **Llama 3 Powered**: Deep analysis using Groq inference
-- **Portfolio Insights**: Personalized recommendations
-
-### � Security
-- **JWT Authentication**: Secure login/signup flow
-- **CORS Protection**: Configured for secure cross-origin requests
-- **Dependency Injection**: Robust backend architecture
-
----
-
-## 🧪 Tech Stack
-
-| Layer      | Technology                          |
-|------------|-------------------------------------|
-| Frontend   | Next.js, Tailwind CSS, Shadcn UI, Recharts |
-| Backend    | FastAPI, SQLModel, Alembic          |
-| Database   | PostgreSQL                          |
-| AI         | Llama 3 70B via Groq (LangChain)    |
-| Auth       | JWT (python-jose) + Bcrypt          |
-| DevOps     | Docker, Kubernetes                  |
-
----
-
-## 📜 License
-
-MIT License.
+See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for AWS deployment instructions.

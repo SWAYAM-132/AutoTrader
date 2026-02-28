@@ -4,3 +4,6 @@ __pycache__
 .gitignore
 *.pyc
 alembic/versions/__pycache__
+.env
+fine_tuning/
+backend.log

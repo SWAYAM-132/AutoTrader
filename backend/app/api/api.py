@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import auth, users, market, news, advisor, webhooks, portfolio
+from app.api.endpoints import auth, users, market, news, advisor, webhooks, portfolio, db_explorer
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -9,3 +9,4 @@ api_router.include_router(news.router, prefix="/news", tags=["news"])
 api_router.include_router(advisor.router, prefix="/advisor", tags=["advisor"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
+api_router.include_router(db_explorer.router, prefix="/db", tags=["database"])

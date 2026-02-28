@@ -3,7 +3,6 @@
 import { Search, Bell, User } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { ModeToggle } from "@/components/theme-provider"
 
 export function DashboardHeader() {
     return (

@@ -33,7 +33,7 @@ api.interceptors.response.use(
                 // Only redirect if not already on login/signup page
                 const path = window.location.pathname;
                 if (!path.startsWith('/login') && !path.startsWith('/signup')) {
-                    window.location.href = '/login';
+                    window.location.href = '/';
                 }
             }
         }

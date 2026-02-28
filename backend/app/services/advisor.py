@@ -7,8 +7,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from app.core.llm import get_llm
-from app.services.market_data import market_service, _normalize_crypto
+from app.core.ticker_mapping import (
+    TICKER_MAPPING,
+    KEYWORD_TO_TICKER,
+    normalize_crypto_symbol,
+)
 from app.services.coingecko import TICKER_TO_COINGECKO
+from app.services.market_data import market_service
 from app.services.news import news_service
 from app.services.rag import rag_service
 
@@ -27,7 +32,7 @@ class AdvisorService:
 
     async def _get_price_data(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Fetch price data — CoinGecko for crypto, Yahoo for stocks."""
-        bare = _normalize_crypto(symbol)
+        bare = normalize_crypto_symbol(symbol)
         if bare in TICKER_TO_COINGECKO:
             return await market_service.get_crypto_price(symbol)
         else:
@@ -35,17 +40,6 @@ class AdvisorService:
 
     async def analyze(self, query: str, context: str = "") -> str:
         enriched_context = context
-
-        # Map natural language names to ticker symbols
-        KEYWORD_TO_TICKER = {
-            "bitcoin": "BTC", "btc": "BTC",
-            "ethereum": "ETH", "eth": "ETH",
-            "solana": "SOL", "dogecoin": "DOGE",
-            "ripple": "XRP", "cardano": "ADA",
-            "apple": "AAPL", "nvidia": "NVDA", "tesla": "TSLA",
-            "microsoft": "MSFT", "amazon": "AMZN", "google": "GOOGL",
-            "meta": "META", "facebook": "META",
-        }
 
         # Extract uppercase ticker symbols from the query (e.g., AAPL, TSLA)
         symbols = set(re.findall(r'\b[A-Z]{1,5}(?:-[A-Z]+)?\b', query))
@@ -75,29 +69,11 @@ class AdvisorService:
         # Fetch sentiment data for the primary symbol
         sentiment_info = []
         if symbols:
-            from app.services.news import news_service as ns
-            news_items = ns.fetch_latest_news(min_relevance=0.15)
-
-            # Simple sentiment analysis per symbol
-            SENTIMENT_KEYWORDS = {
-                "BTC": ["BITCOIN", "BTC", "CRYPTO"],
-                "ETH": ["ETHEREUM", "ETH"],
-                "NVDA": ["NVIDIA", "NVDA", "GPU", "AI CHIP"],
-                "AAPL": ["APPLE", "AAPL", "IPHONE"],
-                "TSLA": ["TESLA", "TSLA", "EV", "ELON"],
-                "MSFT": ["MICROSOFT", "MSFT", "AZURE"],
-                "GOOGL": ["GOOGLE", "GOOGL", "ALPHABET"],
-                "META": ["META", "FACEBOOK", "INSTAGRAM"],
-                "AMZN": ["AMAZON", "AMZN", "AWS"],
-                "SOL": ["SOLANA", "SOL"],
-                "DOGE": ["DOGECOIN", "DOGE"],
-                "XRP": ["RIPPLE", "XRP"],
-                "ADA": ["CARDANO", "ADA"],
-            }
+            news_items = news_service.fetch_latest_news(min_relevance=0.15)
 
             for sym in symbols:
-                bare = _normalize_crypto(sym)
-                keywords = SENTIMENT_KEYWORDS.get(bare, [bare])
+                bare = normalize_crypto_symbol(sym)
+                keywords = TICKER_MAPPING.get(bare, [bare])
                 relevant = []
                 for n in news_items[:50]:
                     text = f"{n['title']} {n['summary']}".upper()
@@ -190,10 +166,16 @@ class AdvisorService:
         chain = prompt | self.llm | StrOutputParser()
 
         try:
-            response = await chain.ainvoke({
-                "query": query,
-                "context": enriched_context,
-            })
+            # HuggingFaceEndpoint sometimes fails on ainvoke() with StopIteration
+            # Running the synchronous invoke() in a thread pool is safer and still non-blocking for FastAPI
+            import asyncio
+            response = await asyncio.to_thread(
+                chain.invoke,
+                {
+                    "query": query,
+                    "context": enriched_context,
+                }
+            )
             return response
         except Exception as e:
             logger.error("Error calling LLM: %s", e)
@@ -201,6 +183,5 @@ class AdvisorService:
                 "I apologize, but I'm having trouble connecting to my analysis engine "
                 "right now. Please try again in a moment."
             )
-
 
 advisor_service = AdvisorService()

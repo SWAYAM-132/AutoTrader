@@ -17,6 +17,19 @@ services:
       timeout: 5s
       retries: 5
 
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: autotraderx_chromadb
+    restart: always
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+      PERSIST_DIRECTORY: "/chroma/chroma"
+
   backend:
     build: ./backend
     container_name: autotraderx_backend
@@ -24,13 +37,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      chromadb:
+        condition: service_started
+    env_file:
+      - ./backend/.env
     environment:
       POSTGRES_SERVER: db
       POSTGRES_USER: ${POSTGRES_USER:-user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: ${POSTGRES_DB:-autotraderx}
-      SECRET_KEY: ${SECRET_KEY:-YOUR_SECRET_KEY_HERE_CHANGE_IN_PRODUCTION}
-      # CORS: allow frontend container and localhost
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      SECRET_KEY: ${SECRET_KEY:-a7d3f8e9b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0}
       BACKEND_CORS_ORIGINS: '["http://localhost:3000", "http://frontend:3000"]'
     ports:
       - "8000:8000"
@@ -42,7 +60,6 @@ services:
     depends_on:
       - backend
     environment:
-      # Browser can access backend at localhost:8000 (public URL)
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
     ports:
       - "3000:3000"
@@ -57,3 +74,4 @@ services:
 
 volumes:
   postgres_data:
+  chroma_data:
