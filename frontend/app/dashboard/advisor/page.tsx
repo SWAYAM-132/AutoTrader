@@ -1,4 +1,16 @@
-import { ChatInterface } from "@/components/chat-interface"
+"use client"
+
+import dynamic from "next/dynamic"
+
+const ChatInterface = dynamic(
+    () => import("@/components/chat-interface").then((mod) => mod.ChatInterface),
+    {
+        ssr: false,
+        loading: () => (
+            <div className="h-[600px] bg-card/40 animate-pulse rounded-xl border border-white/5" />
+        ),
+    }
+)
 
 export default function AdvisorPage() {
     return (

@@ -13,11 +13,12 @@ import {
     AreaChart,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { TrendingUp, TrendingDown, Activity } from "lucide-react"
+import { TrendingUp, TrendingDown, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import api from "@/lib/api"
 
-// Generate realistic-looking portfolio data
+// Keep PortfolioChart as is for now (or remove if unused)
 function generatePortfolioData() {
     const data = []
     let value = 42000
@@ -33,31 +34,8 @@ function generatePortfolioData() {
     return data
 }
 
-function generateStockData(ticker: string, basePrice: number) {
-    const data = []
-    let price = basePrice
-    const now = new Date()
-
-    for (let i = 29; i >= 0; i--) {
-        const date = new Date(now)
-        date.setDate(date.getDate() - i)
-        price += (Math.random() - 0.48) * (basePrice * 0.03)
-        price = Math.max(price, basePrice * 0.7)
-        data.push({
-            date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-            price: Math.round(price * 100) / 100,
-            volume: Math.round(Math.random() * 10000000),
-        })
-    }
-    return data
-}
-
-interface PortfolioChartProps {
-    className?: string
-}
-
-export function PortfolioChart({ className }: PortfolioChartProps) {
-    const [data, setData] = useState(generatePortfolioData())
+export function PortfolioChart({ className }: { className?: string }) {
+    const [data] = useState(generatePortfolioData())
 
     return (
         <Card className={cn("border-white/5 bg-black/40 shadow-2xl overflow-hidden", className)}>
@@ -67,7 +45,7 @@ export function PortfolioChart({ className }: PortfolioChartProps) {
                         <div className="p-2 bg-primary/10 rounded-lg">
                             <TrendingUp className="h-4 w-4 text-primary" />
                         </div>
-                        <span className="font-bold text-white tracking-tight">Portfolio Alpha</span>
+                        <span className="font-bold text-white tracking-tight">Portfolio Performance</span>
                     </div>
                     <Badge variant="outline" className="text-green-400 border-green-400/20 bg-green-400/5">
                         +20.1% YTD
@@ -105,7 +83,7 @@ export function PortfolioChart({ className }: PortfolioChartProps) {
                             }}
                             itemStyle={{ color: 'oklch(0.7 0.2 250)', fontWeight: 'bold' }}
                             labelStyle={{ color: 'rgba(255,255,255,0.4)', marginBottom: '4px' }}
-                            formatter={(value?: number) => [`$${(value ?? 0).toLocaleString()}`, "Value"]}
+                            formatter={(value: any) => [`$${(value ?? 0).toLocaleString()}`, "Value"]}
                         />
                         <Area
                             type="monotone"
@@ -125,16 +103,67 @@ export function PortfolioChart({ className }: PortfolioChartProps) {
 interface StockChartProps {
     ticker: string
     name: string
-    basePrice: number
+    basePrice?: number // Optional now
     className?: string
 }
 
-export function StockChart({ ticker, name, basePrice, className }: StockChartProps) {
-    const [data] = useState(() => generateStockData(ticker, basePrice))
-    const currentPrice = data[data.length - 1]?.price ?? basePrice
-    const prevPrice = data[data.length - 2]?.price ?? basePrice
+export function StockChart({ ticker, name, className }: StockChartProps) {
+    const [data, setData] = useState<any[]>([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(false)
+
+    useEffect(() => {
+        let mounted = true
+        async function fetchData() {
+            try {
+                // Determine interval based on ticker type if needed, but endpoint handles it.
+                // For crypto (BTC), 1mo/1d is fine. For stocks, same.
+                const res = await api.get(`/market/history/${ticker}?period=1mo&interval=1d`)
+                if (mounted && res.data && res.data.history) {
+                    const history = res.data.history.map((h: any) => ({
+                        date: new Date(h.timestamp * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                        price: h.close || h.open, // Fallback if close is null
+                    })).filter((h: any) => h.price !== null)
+                    setData(history)
+                }
+            } catch (err) {
+                console.error(`Failed to fetch history for ${ticker}`, err)
+                if (mounted) setError(true)
+            } finally {
+                if (mounted) setLoading(false)
+            }
+        }
+        fetchData()
+        return () => { mounted = false }
+    }, [ticker])
+
+    if (loading) {
+        return (
+            <Card className={cn("border-white/5 bg-black/20 h-[280px] flex items-center justify-center", className)}>
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </Card>
+        )
+    }
+
+    if (error || data.length === 0) {
+        return (
+            <Card className={cn("border-white/5 bg-black/20 h-[280px] flex items-center justify-center", className)}>
+                <div className="text-center text-muted-foreground text-sm">
+                    <p>Failed to load data</p>
+                    <p className="text-xs">{ticker}</p>
+                </div>
+            </Card>
+        )
+    }
+
+    const currentPrice = data[data.length - 1]?.price || 0
+    const prevPrice = data[0]?.price || 0 // Compare with start of month for "monthly change"
+    // Or compare with yesterday? simpler is start of period for the chart
+    // But typically user wants 24h change. 
+    // The chart shows 1mo. The "change" displayed should probably be the 1mo change if the chart is 1mo.
+    // Let's use the first point of the chart as reference for the chart's "change" display.
     const change = currentPrice - prevPrice
-    const changePct = ((change / prevPrice) * 100).toFixed(2)
+    const changePct = prevPrice > 0 ? ((change / prevPrice) * 100).toFixed(2) : "0.00"
     const isPositive = change >= 0
 
     return (
@@ -146,10 +175,11 @@ export function StockChart({ ticker, name, basePrice, className }: StockChartPro
                         <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest leading-none mt-1">{name}</p>
                     </div>
                     <div className="text-right">
-                        <div className="text-xl font-bold tracking-tight text-white">${currentPrice.toLocaleString()}</div>
+                        <div className="text-xl font-bold tracking-tight text-white">${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                         <div className={`text-xs font-black flex items-center justify-end gap-1 ${isPositive ? "text-green-400" : "text-red-400"}`}>
                             {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                             {isPositive ? "+" : ""}{change.toFixed(2)} ({isPositive ? "+" : ""}{changePct}%)
+                            <span className="text-[10px] text-muted-foreground font-normal ml-1">1mo</span>
                         </div>
                     </div>
                 </CardTitle>
@@ -172,7 +202,7 @@ export function StockChart({ ticker, name, basePrice, className }: StockChartPro
                                 border: '1px solid rgba(255,255,255,0.1)',
                                 borderRadius: '8px',
                             }}
-                            formatter={(value?: number) => [`$${(value ?? 0).toFixed(2)}`, "Price"]}
+                            formatter={(value: any) => [`$${Number(value).toFixed(2)}`, "Price"]}
                         />
                         <Line
                             type="monotone"
@@ -187,4 +217,3 @@ export function StockChart({ ticker, name, basePrice, className }: StockChartPro
         </Card>
     )
 }
-

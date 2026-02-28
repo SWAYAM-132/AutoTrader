@@ -1,137 +1,294 @@
 "use client"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
-import { DollarSign, Activity, TrendingUp, ArrowUpRight, ArrowDownRight, Search, Zap } from "lucide-react"
-import { PortfolioChart } from "@/components/charts"
-import SentimentWidget from "@/components/SentimentWidget"
+import { DashboardHeader } from "@/components/DashboardHeader"
+import { TickerCard } from "@/components/TickerCard"
 
-const recentActivity = [
-    { action: "Bought", asset: "AAPL", amount: "+$250.00", time: "Today, 10:42 AM", positive: true },
-    { action: "Sold", asset: "BTC", amount: "+$1,200.00", time: "Yesterday, 2:30 PM", positive: true },
-    { action: "Bought", asset: "ETH", amount: "-$500.00", time: "Yesterday, 11:15 AM", positive: false },
-    { action: "Dividend", asset: "MSFT", amount: "+$32.50", time: "2 days ago", positive: true },
-    { action: "Sold", asset: "TSLA", amount: "+$890.00", time: "3 days ago", positive: true },
-]
+import { WatchlistSidebar } from "@/components/WatchlistSidebar"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Activity, Globe, Wallet, Zap, Loader2, TrendingUp } from "lucide-react"
+import { NewsFeed } from "@/components/NewsFeed"
+import { useEffect, useState } from "react"
+import dynamic from "next/dynamic"
+import api from "@/lib/api"
+
+const PredictionMarketWidget = dynamic(() => import("@/components/PredictionMarketWidget").then(mod => mod.PredictionMarketWidget), {
+    ssr: false,
+    loading: () => <div className="h-[200px] w-full bg-card/40 animate-pulse rounded-xl border border-white/5" />,
+})
+
+const MarketSummary = dynamic(() => import("@/components/MarketSummary").then(mod => mod.MarketSummary), {
+    ssr: false,
+    loading: () => <div className="h-[200px] w-full bg-card/40 animate-pulse rounded-xl" />,
+})
+
+const PortfolioView = dynamic(() => import("@/components/PortfolioView").then(mod => mod.PortfolioView), {
+    ssr: false,
+    loading: () => <div className="h-[400px] bg-card/40 animate-pulse rounded-xl" />,
+})
+
+const ChatInterface = dynamic(() => import("@/components/chat-interface").then(mod => mod.ChatInterface), {
+    ssr: false,
+    loading: () => <div className="h-[600px] bg-card/40 animate-pulse rounded-xl border border-white/5" />,
+})
+
+// Symbols to fetch for the Top Movers section
+const TOP_MOVER_SYMBOLS = ["BTC-USD", "ETH-USD", "NVDA", "SPY", "GC=F"]
+
+interface TickerData {
+    symbol: string
+    name: string
+    price: string
+    change: string
+    changePercent: string
+    isPositive: boolean
+    changeVal: number
+    priceVal: number
+    sentimentScore?: number
+}
+
+interface PredictionItem {
+    question: string
+    probability: number
+    volume: string
+    trend: number
+}
+
+interface NewsItem {
+    title: string
+    summary: string
+    source: string
+    time: string
+    url?: string
+}
+
+const SYMBOL_NAMES: Record<string, string> = {
+    "BTC-USD": "Bitcoin",
+    "ETH-USD": "Ethereum",
+    "NVDA": "NVIDIA Corp",
+    "AAPL": "Apple Inc",
+    "TSLA": "Tesla Inc",
+    "MSFT": "Microsoft Corp",
+    "GOOGL": "Alphabet Inc",
+    "AMZN": "Amazon.com",
+    "META": "Meta Platforms",
+    "SPY": "S&P 500",
+    "GC=F": "Gold",
+}
 
 export default function DashboardPage() {
+    const [tickerData, setTickerData] = useState<TickerData[]>([])
+    const [predictions, setPredictions] = useState<PredictionItem[]>([])
+    const [globalEvents, setGlobalEvents] = useState<PredictionItem[]>([])
+    const [newsItems, setNewsItems] = useState<NewsItem[]>([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        fetchDashboardData()
+    }, [])
+
+    async function fetchDashboardData() {
+        setLoading(true)
+        try {
+            // Fetch sentiment + news IN PARALLEL for faster loading
+            const [sentimentResults, newsRes] = await Promise.all([
+                Promise.allSettled(
+                    TOP_MOVER_SYMBOLS.map((sym) => api.get(`/market/sentiment/${sym}`))
+                ),
+                api.get("/news/latest").catch(() => ({ data: [] })),
+            ])
+
+            // Process sentiment results
+            const tickers: TickerData[] = []
+            const sentimentMap: Record<string, any> = {}
+
+            for (const result of sentimentResults) {
+                if (result.status === "fulfilled") {
+                    const d = result.value.data
+                    const isPositive = d.change_percent >= 0
+                    const dollarChange = Math.abs(d.price * d.change_percent / 100)
+                    tickers.push({
+                        symbol: d.symbol,
+                        name: SYMBOL_NAMES[d.symbol] || d.symbol,
+                        price: `$${d.price.toLocaleString()}`,
+                        change: `${isPositive ? "+" : "-"}$${dollarChange.toFixed(2)}`,
+                        changePercent: `${Math.abs(d.change_percent).toFixed(2)}%`,
+                        isPositive,
+                        changeVal: d.change_percent,
+                        priceVal: d.price,
+                        sentimentScore: d.score,
+                    })
+                    sentimentMap[d.symbol] = d
+                }
+            }
+            setTickerData(tickers)
+
+            // Derive Predictions
+            const btcData = sentimentMap["BTC-USD"]
+            const btcProb = btcData ? Math.min(Math.max(btcData.score * 100, 10), 95) : 50
+            const btcTrend = btcData ? btcData.change_percent : 0
+
+            const spyData = sentimentMap["SPY"]
+            const spyProb = spyData ? Math.min(Math.max(spyData.score * 100, 15), 90) : 60
+            const spyTrend = spyData ? spyData.change_percent : 0
+
+            setPredictions([
+                {
+                    question: "Bitcoin to hit $100k by Q4?",
+                    probability: Math.round(btcProb),
+                    volume: "$42M",
+                    trend: btcTrend
+                },
+                {
+                    question: "S&P 500 Bull Run Continues?",
+                    probability: Math.round(spyProb),
+                    volume: "$125M",
+                    trend: spyTrend
+                },
+            ])
+
+            const goldData = sentimentMap["GC=F"]
+            const goldProb = goldData ? Math.min(Math.max(goldData.score * 100, 20), 85) : 45
+            setGlobalEvents([
+                {
+                    question: "Gold Breaks ATH this month?",
+                    probability: Math.round(goldProb),
+                    volume: "$88M",
+                    trend: goldData ? goldData.change_percent : 0.5
+                }
+            ])
+
+            // Process news results
+            if (newsRes.data && newsRes.data.length > 0) {
+                const items = newsRes.data.slice(0, 5).map((n: any) => ({
+                    title: n.title,
+                    summary: n.summary,
+                    source: n.source,
+                    time: new Date(n.published_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    url: n.url
+                }))
+                setNewsItems(items)
+            }
+
+        } catch (err) {
+            console.error("Failed to fetch dashboard data:", err)
+        } finally {
+            setLoading(false)
+        }
+    }
+
     return (
-        <div className="space-y-8 p-6 md:p-10 min-h-screen transition-colors">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
-                <div className="text-center md:text-left">
-                    <div className="flex items-center justify-center md:justify-start gap-2 mb-2">
-                        <div className="h-1 w-8 bg-primary rounded-full" />
-                        <span className="text-[10px] uppercase font-black tracking-[0.3em] text-primary">Intelligence Hub</span>
-                    </div>
-                    <h2 className="text-5xl md:text-6xl font-black tracking-tighter text-white">
-                        Market <span className="text-primary italic">Alpha</span>
-                    </h2>
-                    <p className="text-white/70 mt-4 text-lg font-medium flex items-center justify-center md:justify-start gap-3">
-                        <span className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
-                        Opportunity detected in Growth Phase.
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <Button variant="outline" className="border-white/10 bg-black/40 hover:bg-white/5 rounded-xl px-6 h-12 font-bold transition-all">
-                        Download Report
-                    </Button>
-                    <Button className="bg-white text-black hover:bg-white/90 rounded-xl px-8 h-12 font-bold shadow-xl shadow-white/10 transition-all">
-                        Invest Now
-                    </Button>
-                </div>
-            </div>
+        <div className="min-h-screen bg-background text-foreground font-sans">
+            <DashboardHeader />
 
-            {/* KPI Cards */}
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-12">
-                {[
-                    { title: "PORTFOLIO TOTAL", value: "$45,231.89", change: "+20.1%", icon: <DollarSign className="h-5 w-5" />, sub: "FROM $37.5K", glow: "shadow-primary/10" },
-                    { title: "ACTIVE POSITIONS", value: "12", change: "+2", icon: <Activity className="h-5 w-5" />, sub: "TOP: BTC/USD", glow: "shadow-green-500/10" },
-                    { title: "UNREALIZED GAINS", value: "$8,432.12", change: "+19.2%", icon: <TrendingUp className="h-5 w-5" />, sub: "GROWTH PHASE", glow: "shadow-blue-500/10" },
-                    { title: "RISK FACTOR", value: "0.24", change: "-2.1%", icon: <Zap className="h-5 w-5" />, sub: "OPTIMAL SAFETY", glow: "shadow-yellow-500/10" }
-                ].map((kpi) => (
-                    <Card key={kpi.title} className={cn("bg-black border-white/5 hover:border-white/10 transition-all duration-500 group relative overflow-hidden", kpi.glow)}>
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                            <CardTitle className="text-[10px] uppercase font-black tracking-[0.2em] text-muted-foreground group-hover:text-primary transition-colors">
-                                {kpi.title}
-                            </CardTitle>
-                            <div className="p-2 bg-white/5 rounded-lg group-hover:bg-primary/20 group-hover:text-primary transition-all duration-500">
-                                {kpi.icon}
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-3xl font-black tracking-tight text-white mb-1">{kpi.value}</div>
-                            <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase">{kpi.sub}</p>
-                                <Badge variant="outline" className={cn(
-                                    "border-none font-black text-xs",
-                                    kpi.change.startsWith("+") ? "text-green-400 bg-green-400/10" : "text-red-400 bg-red-400/10"
-                                )}>
-                                    {kpi.change}
-                                </Badge>
-                            </div>
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
+            <main className="pt-24 px-4 md:px-6 max-w-[1600px] mx-auto">
+                <div className="mb-12">
+                    <ChatInterface />
+                </div>
 
-            {/* Charts + Activity + Sentiment */}
-            <div className="grid gap-6 lg:grid-cols-7">
-                <div className="lg:col-span-4 space-y-6">
-                    <Card className="bg-black/40 p-4 overflow-hidden border-white/5 shadow-2xl relative">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-primary/20" />
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-white">
+                <Tabs defaultValue="market" className="space-y-8">
+                    <TabsList className="bg-transparent border-b border-white/10 w-full justify-start h-auto p-0 gap-6 rounded-none">
+                        <TabsTrigger value="market" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-0 py-3 text-muted-foreground data-[state=active]:text-foreground font-medium text-sm flex items-center gap-2">
+                            <Globe className="h-4 w-4" /> Market Overview
+                        </TabsTrigger>
+                        <TabsTrigger value="crypto" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-0 py-3 text-muted-foreground data-[state=active]:text-foreground font-medium text-sm flex items-center gap-2">
+                            <Zap className="h-4 w-4" /> Crypto & De-Fi
+                        </TabsTrigger>
+                        <TabsTrigger value="portfolio" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-0 py-3 text-muted-foreground data-[state=active]:text-foreground font-medium text-sm flex items-center gap-2">
+                            <Wallet className="h-4 w-4" /> Portfolio
+                        </TabsTrigger>
+                        <TabsTrigger value="news" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-0 py-3 text-muted-foreground data-[state=active]:text-foreground font-medium text-sm flex items-center gap-2">
+                            <Activity className="h-4 w-4" /> Live News
+                        </TabsTrigger>
+                    </TabsList>
+
+                    {/* MARKET TAB */}
+                    <TabsContent value="market" className="space-y-8 animate-in fade-in duration-500">
+                        {/* Top Movers Row */}
+                        <div>
+                            <div className="flex items-center gap-2 mb-4">
                                 <TrendingUp className="h-5 w-5 text-primary" />
-                                Portfolio Alpha
-                            </CardTitle>
-                        </CardHeader>
-                        <PortfolioChart className="h-[350px] border-none shadow-none bg-transparent" />
-                    </Card>
-
-                    <SentimentWidget />
-                </div>
-
-                <div className="lg:col-span-3">
-                    <Card className="bg-black/40 overflow-hidden border-white/5 shadow-2xl h-full">
-                        <CardHeader className="border-b border-white/5">
-                            <CardTitle className="flex items-center gap-2 text-white">
-                                <Activity className="h-5 w-5 text-primary" />
-                                Recent Activity
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-6">
-                            <div className="space-y-6">
-                                {recentActivity.map((item, i) => (
-                                    <div
-                                        key={i}
-                                        className="flex items-center justify-between group cursor-pointer"
-                                    >
-                                        <div className="flex items-center gap-4">
-                                            <div className={`p-2.5 rounded-xl transition-colors ${item.positive ? "bg-green-500/10 group-hover:bg-green-500/20" : "bg-red-500/10 group-hover:bg-red-500/20"}`}>
-                                                {item.positive ? (
-                                                    <ArrowUpRight className="h-4 w-4 text-green-500" />
-                                                ) : (
-                                                    <ArrowDownRight className="h-4 w-4 text-red-500" />
-                                                )}
-                                            </div>
-                                            <div>
-                                                <p className="text-sm font-semibold text-white group-hover:text-primary transition-colors">{item.action} {item.asset}</p>
-                                                <p className="text-xs text-muted-foreground">{item.time}</p>
-                                            </div>
-                                        </div>
-                                        <span className={`text-sm font-bold ${item.positive ? "text-green-400" : "text-red-400"}`}>
-                                            {item.amount}
-                                        </span>
-                                    </div>
-                                ))}
+                                <h3 className="text-xl font-bold">Top Movers</h3>
                             </div>
-                        </CardContent>
-                    </Card>
-                </div>
-            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                                {loading ? (
+                                    Array.from({ length: 5 }).map((_, i) => (
+                                        <div key={i} className="h-[120px] bg-card/40 animate-pulse rounded-xl border border-white/5" />
+                                    ))
+                                ) : tickerData.length > 0 ? (
+                                    tickerData.map(t => (
+                                        <TickerCard key={t.symbol} {...t} data={[
+                                            { value: 100 },
+                                            { value: t.isPositive ? 105 : 95 },
+                                            { value: t.isPositive ? 110 : 90 }
+                                        ]} />
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-muted-foreground col-span-5 text-center py-4">No ticker data available</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Predictions + News Grid */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="lg:col-span-2 space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <PredictionMarketWidget
+                                        title="Market Predictions"
+                                        items={predictions.length > 0 ? predictions : [
+                                            { question: "Loading markets...", probability: 50, volume: "-", trend: 0 }
+                                        ]}
+                                    />
+                                    <PredictionMarketWidget
+                                        title="Global Events"
+                                        items={globalEvents.length > 0 ? globalEvents : [
+                                            { question: "Loading events...", probability: 50, volume: "-", trend: 0 }
+                                        ]}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Sidebar: News */}
+                            <div className="space-y-6">
+                                <MarketSummary items={newsItems.length > 0 ? newsItems : [
+                                    { title: "Loading news...", summary: "Fetching latest market updates...", source: "System", time: "Now" }
+                                ]} />
+                            </div>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="crypto" className="animate-in fade-in duration-500">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                            {loading ? (
+                                <div className="col-span-4 flex items-center justify-center py-8">
+                                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                                </div>
+                            ) : (
+                                tickerData
+                                    .filter(t => ["BTC-USD", "ETH-USD"].includes(t.symbol))
+                                    .map(t => <TickerCard key={t.symbol + "c"} {...t} data={[
+                                        { value: 100 },
+                                        { value: t.isPositive ? 105 : 95 },
+                                        { value: t.isPositive ? 110 : 90 }
+                                    ]} />)
+                            )}
+                        </div>
+                        <div className="p-12 border border-dashed border-white/10 rounded-xl text-center text-muted-foreground">
+                            Advanced Crypto Charts & On-Chain Analysis (Coming Soon)
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="portfolio" className="animate-in fade-in duration-500">
+                        <PortfolioView />
+                    </TabsContent>
+
+                    <TabsContent value="news" className="animate-in fade-in duration-500">
+                        <div className="max-w-4xl mx-auto space-y-6">
+                            <NewsFeed />
+                        </div>
+                    </TabsContent>
+
+                </Tabs>
+            </main>
         </div>
     )
 }
