@@ -11,7 +11,6 @@ const api = axios.create({
 // Request interceptor to add the auth token header to requests
 api.interceptors.request.use(
     (config) => {
-        // We will implement token retrieval from localStorage or cookie here later
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
         if (token) {
             config.headers['Authorization'] = `Bearer ${token}`;
@@ -23,13 +22,20 @@ api.interceptors.request.use(
     }
 );
 
-// Response interceptor
+// Response interceptor — handle 401 by clearing stale token and redirecting
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        // Handle 401 Unauthorized errors globally
         if (error.response && error.response.status === 401) {
-            // specific logic for 401
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                // Only redirect if not already on login/signup page
+                const path = window.location.pathname;
+                if (!path.startsWith('/login') && !path.startsWith('/signup')) {
+                    window.location.href = '/';
+                }
+            }
         }
         return Promise.reject(error);
     }

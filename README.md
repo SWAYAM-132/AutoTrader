@@ -1,232 +1,99 @@
-# 🚀 AutoTraderX — AI-Powered Investment Platform
+# AutoTraderX
 
-> Full-stack investment intelligence platform powered by Llama 3 (via Groq), real-time market data, and modern web technologies.
+An AI-powered financial trading assistant with real-time market data, sentiment analysis, and an intelligent chatbot advisor.
 
-![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
-
----
-
-## 📁 Project Structure
+## Architecture
 
 ```
 AutoTraderX/
-├── backend/                 # FastAPI REST API
+├── backend/               # FastAPI + PostgreSQL + ChromaDB
 │   ├── app/
-│   │   ├── api/             # Route handlers (auth, users, market, news, advisor)
-│   │   ├── core/            # Config, security, LLM client
-│   │   ├── db/              # Database session & seeders
-│   │   ├── models/          # SQLModel schemas
-│   │   └── services/        # Business logic (market data, news, AI advisor)
-│   ├── alembic/             # Database migrations
+│   │   ├── api/           # REST endpoints (auth, market, news, advisor, db)
+│   │   ├── core/          # Config, LLM, security, ticker mappings
+│   │   ├── db/            # Database session & seed data
+│   │   ├── models/        # SQLModel ORM models
+│   │   └── services/      # Business logic (news, market, RAG, advisor)
+│   ├── fine_tuning/       # QLoRA fine-tuning scripts (GPU required)
 │   ├── Dockerfile
 │   └── requirements.txt
-├── frontend/                # Next.js 16 + Tailwind + Shadcn UI
-│   ├── app/
-│   │   ├── dashboard/       # Dashboard, Market, Portfolio, News, AI Advisor
-│   │   ├── login/           # Authentication pages
-│   │   └── signup/
-│   ├── components/          # Reusable UI components (Charts, Sidebar, Navbar)
-│   ├── lib/                 # API client, utilities
-│   ├── Dockerfile
-│   └── package.json
-├── k8s/                     # Kubernetes manifests
-├── docs/                    # AWS deployment guide
-├── docker-compose.yml       # Local dev services (Postgres, Neo4j, Adminer)
-└── README.md
+├── frontend/              # Next.js 14 dashboard
+│   ├── app/               # Pages (dashboard, login, signup)
+│   ├── components/        # UI components (chat, portfolio, news, etc.)
+│   ├── lib/               # API client
+│   └── Dockerfile
+├── docker-compose.yml     # Full stack orchestration
+└── k8s/                   # Kubernetes deployment configs
 ```
 
----
-
-## ✅ Prerequisites
-
-- **Node.js** 20+
-- **Python** 3.12+
-- **Docker Desktop** (for PostgreSQL & Neo4j)
-- **Groq API Key** — [Get one free](https://console.groq.com/)
-
----
-
-## 🏃 Quick Start
-
-### 1. Clone & Enter
+## Quick Start (Docker)
 
 ```bash
-git clone https://github.com/your-username/AutoTraderX.git
-cd AutoTraderX
-```
-
-### 2. Start Database Services
-
-```bash
-docker compose up -d
-```
-
-This starts:
-| Service   | Port  | Description               |
-|-----------|-------|---------------------------|
-| Postgres  | 5432  | Primary database          |
-| Neo4j     | 7474  | Graph database (browser)  |
-| Neo4j     | 7687  | Graph database (bolt)     |
-| Adminer   | 9090  | Database admin UI         |
-
-### 3. Setup Backend
-
-```bash
-cd backend
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate     # macOS/Linux
-# .venv\Scripts\activate      # Windows
-
-# Install dependencies
-pip install -r requirements.txt
+# Clone and start all services
+git clone <repo-url> && cd AutoTraderX
 
 # Configure environment
-cp .env.example .env          # Edit .env with your keys (see below)
+cp backend/.env.example backend/.env
+# Edit backend/.env with your GROQ_API_KEY
 
-# Run database migrations
-alembic upgrade head
+# Build and start everything
+docker compose up --build -d
 
-# (Optional) Seed sample users
-python -m app.db.init_data
-
-# Start the server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# Check all services are running
+docker compose ps
 ```
 
-### 4. Setup Frontend
+### Services
+
+| Service    | URL                          | Description              |
+|------------|------------------------------|--------------------------|
+| Frontend   | http://localhost:3000         | Next.js dashboard        |
+| Backend    | http://localhost:8000         | FastAPI REST API          |
+| API Docs   | http://localhost:8000/docs    | Swagger UI               |
+| Adminer    | http://localhost:9090         | Database admin panel      |
+| ChromaDB   | http://localhost:8001         | Vector store (RAG)        |
+
+### Key API Endpoints
+
+| Endpoint                          | Method | Description                    |
+|-----------------------------------|--------|--------------------------------|
+| `/api/v1/health`                  | GET    | Health check                   |
+| `/api/v1/auth/login`              | POST   | Login (OAuth2)                 |
+| `/api/v1/auth/signup`             | POST   | User registration              |
+| `/api/v1/market/sentiment/{sym}`  | GET    | Price + sentiment for ticker   |
+| `/api/v1/news/latest`             | GET    | Latest financial news          |
+| `/api/v1/advisor/chat`            | POST   | AI advisor chat (auth required)|
+| `/api/v1/db/tables`              | GET    | List database tables           |
+| `/api/v1/db/tables/{name}`        | GET    | View table data (paginated)    |
+| `/api/v1/db/rag/stats`           | GET    | RAG vector store statistics    |
+
+## Features
+
+- **AI Financial Advisor** — Chat-based advisor powered by LLaMA 3 via Groq
+- **RAG Knowledge Base** — ChromaDB vector store with sentence-transformers embeddings
+- **Real-time Market Data** — Prices from Yahoo Finance & CoinGecko
+- **News Aggregation** — RSS feeds from 13+ financial news sources with sentiment analysis
+- **Portfolio Management** — Track holdings with real-time P&L
+- **QLoRA Fine-Tuning** — Scripts to fine-tune LLMs on financial advisory data
+
+## Fine-Tuning (QLoRA)
+
+See [backend/fine_tuning/README.md](backend/fine_tuning/README.md) for instructions on fine-tuning the LLM using QLoRA with GPU.
+
+## Development
 
 ```bash
+# Backend (local development)
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+# Frontend (local development)
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start dev server
 npm run dev
 ```
 
-### 5. Open the App
+## Deployment
 
-| URL                        | Description          |
-|---------------------------|----------------------|
-| http://localhost:3000      | Frontend (Next.js)   |
-| http://localhost:8000/docs | API Docs (Swagger)   |
-| http://localhost:9090      | Adminer (DB Admin)   |
-
----
-
-## 🔑 Environment Variables
-
-Create `backend/.env`:
-
-```env
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/autotraderx
-SECRET_KEY=your-super-secret-jwt-key-change-me
-GROQ_API_KEY=gsk_your_groq_api_key_here
-```
-
-> **Note:** If you don't set `GROQ_API_KEY`, the app will still start — only the AI Advisor chat will be unavailable.
-
----
-
-## 🧩 Features
-
-### 📊 Dashboard
-- Portfolio performance chart (YTD area chart)
-- KPI cards: Total Balance, Active Positions, P&L, Win Rate
-- Recent activity feed
-
-### 📈 Market
-- Real-time stock & crypto charts (AAPL, BTC, NVDA, ETH)
-- Watchlist with 8 tracked assets
-- Price change indicators
-
-### 💼 Portfolio
-- Donut allocation chart
-- Holdings table with per-asset P&L
-- Summary cards (Total Value, Total P&L, Asset Count)
-
-### 📰 News
-- Aggregated financial news from RSS feeds
-- Color-coded category badges (Macro, Crypto, Tech, Commodities)
-- Live update indicator
-
-### 🤖 AI Financial Advisor
-- Chat with Llama 3 (70B) via Groq
-- Context-aware financial analysis
-- Risk disclaimers included
-
-### 🔐 Authentication
-- JWT-based login/signup
-- Bcrypt password hashing
-- Protected API routes
-
----
-
-## 🛠️ API Endpoints
-
-| Method | Endpoint                    | Description              | Auth |
-|--------|-----------------------------|--------------------------|------|
-| POST   | `/api/v1/auth/login`        | Login (get JWT token)    | No   |
-| POST   | `/api/v1/auth/signup`       | Register new user        | No   |
-| GET    | `/api/v1/users/me`          | Get current user profile | Yes  |
-| GET    | `/api/v1/market/stock/{ticker}` | Get stock price      | No   |
-| GET    | `/api/v1/market/crypto/{symbol}`| Get crypto price     | No   |
-| GET    | `/api/v1/news/latest`       | Get latest news          | No   |
-| POST   | `/api/v1/advisor/chat`      | Chat with AI advisor     | Yes  |
-| GET    | `/api/v1/health`            | Health check             | No   |
-
----
-
-## 🐳 Docker (Production)
-
-Build and run both services:
-
-```bash
-# Backend
-cd backend && docker build -t autotraderx-backend .
-docker run -p 8000:8000 --env-file .env autotraderx-backend
-
-# Frontend
-cd frontend && docker build -t autotraderx-frontend .
-docker run -p 3000:3000 autotraderx-frontend
-```
-
----
-
-## ☸️ Kubernetes Deployment
-
-```bash
-kubectl apply -f k8s/secrets.yaml
-kubectl apply -f k8s/postgres-deployment.yaml
-kubectl apply -f k8s/backend-deployment.yaml
-kubectl apply -f k8s/frontend-deployment.yaml
-kubectl apply -f k8s/ingress.yaml
-```
-
-For full AWS EKS deployment, see [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md).
-
----
-
-## 🧪 Tech Stack
-
-| Layer      | Technology                          |
-|------------|-------------------------------------|
-| Frontend   | Next.js 16, Tailwind CSS, Shadcn UI, Recharts |
-| Backend    | FastAPI, SQLModel, Alembic          |
-| Database   | PostgreSQL 15, Neo4j 5              |
-| AI         | Llama 3 70B via Groq (LangChain)   |
-| Auth       | JWT (python-jose) + Bcrypt          |
-| Data       | yfinance, ccxt, feedparser          |
-| DevOps     | Docker, Kubernetes, AWS EKS         |
-
----
-
-## 📜 License
-
-MIT License — see [LICENSE](LICENSE) for details.
+See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for AWS deployment instructions.
