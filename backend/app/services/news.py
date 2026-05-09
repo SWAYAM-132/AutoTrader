@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import re
@@ -182,13 +183,13 @@ class NewsService:
         only_actionable: bool = False,
         source_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
+        """Synchronous wrapper — uses cache or returns stale data while async fetch runs."""
         global _news_cache
 
         # ── Return cached data if still fresh ──
         cache_age = time.time() - _news_cache["fetched_at"]
         if _news_cache["data"] and cache_age < NEWS_CACHE_TTL_SECONDS and source_types is None:
             logger.info("Returning cached news (%d articles, %.0fs old)", len(_news_cache["data"]), cache_age)
-            # Apply filters to cached data
             filtered = [
                 a for a in _news_cache["data"]
                 if a["relevance_score"] >= min_relevance
@@ -196,97 +197,126 @@ class NewsService:
             ]
             return filtered
 
-        # ── Fetch fresh data ──
+        # Synchronous fallback: run async version in thread if no cache
+        try:
+            loop = asyncio.get_running_loop()
+            # We're inside an event loop — can't block. Return stale cache or empty.
+            if _news_cache["data"]:
+                return [
+                    a for a in _news_cache["data"]
+                    if a["relevance_score"] >= min_relevance
+                    and (not only_actionable or a["prediction"] != "Watch")
+                ]
+            return self._fallback_articles(min_relevance, only_actionable)
+        except RuntimeError:
+            # No event loop — safe to run synchronously in a new loop
+            return asyncio.run(
+                self.fetch_latest_news_async(min_relevance, only_actionable, source_types)
+            )
+
+    async def _fetch_single_feed(
+        self,
+        client: httpx.AsyncClient,
+        feed_source: FeedSource,
+    ) -> List[Dict[str, Any]]:
+        """Fetch and parse a single RSS feed asynchronously."""
+        articles = []
+        try:
+            response = await client.get(
+                feed_source["url"],
+                headers={"User-Agent": USER_AGENT},
+            )
+            if response.status_code != 200:
+                logger.warning("Failed to fetch %s: HTTP %s", feed_source["label"], response.status_code)
+                return []
+
+            feed = feedparser.parse(response.text)
+            for entry in feed.entries[:8]:
+                published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+                published_dt = (
+                    datetime.fromtimestamp(time.mktime(published_parsed))
+                    if published_parsed
+                    else datetime.now()
+                )
+
+                title = entry.get("title", "Untitled")
+                link = entry.get("link", feed_source["url"])
+                summary = entry.get("summary", "")
+
+                relevance_score = self.get_relevance_score(title, summary, feed_source["trust"])
+                sentiment = self.get_sentiment(f"{title} {summary}")
+                signal_score = self.get_signal_score(relevance_score, sentiment)
+                prediction = self.predict_market_impact(signal_score)
+                credibility = self.get_credibility_score(
+                    f"{title} {summary}", feed_source["trust"]
+                )
+
+                articles.append({
+                    "title": title,
+                    "link": link,
+                    "summary": summary,
+                    "source": feed_source["label"],
+                    "source_type": feed_source["source_type"],
+                    "published_at": published_dt,
+                    "sentiment": sentiment,
+                    "relevance_score": relevance_score,
+                    "signal_score": signal_score,
+                    "prediction": prediction,
+                    "credibility_score": credibility,
+                })
+        except Exception as error:
+            logger.error("Error fetching RSS %s: %s", feed_source["label"], error)
+        return articles
+
+    async def fetch_latest_news_async(
+        self,
+        min_relevance: float = 0.30,
+        only_actionable: bool = False,
+        source_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Async version — fetches all RSS feeds in parallel for maximum speed."""
+        global _news_cache
+
+        # ── Return cached data if still fresh ──
+        cache_age = time.time() - _news_cache["fetched_at"]
+        if _news_cache["data"] and cache_age < NEWS_CACHE_TTL_SECONDS and source_types is None:
+            logger.info("Returning cached news (%d articles, %.0fs old)", len(_news_cache["data"]), cache_age)
+            filtered = [
+                a for a in _news_cache["data"]
+                if a["relevance_score"] >= min_relevance
+                and (not only_actionable or a["prediction"] != "Watch")
+            ]
+            return filtered
+
+        # ── Filter sources by type ──
+        selected_source_types = {item.strip().lower() for item in source_types or [] if item.strip()}
+        sources_to_fetch = [
+            s for s in NEWS_SOURCES
+            if not selected_source_types or s["source_type"] in selected_source_types
+        ]
+
+        # ── Fetch ALL feeds in parallel ──
+        async with httpx.AsyncClient(
+            verify=False, follow_redirects=True, timeout=10.0
+        ) as client:
+            tasks = [self._fetch_single_feed(client, src) for src in sources_to_fetch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # ── Merge and de-duplicate ──
         all_articles: List[Dict[str, Any]] = []
         seen_hashes: set = set()
-        selected_source_types = {item.strip().lower() for item in source_types or [] if item.strip()}
-
-        with httpx.Client(verify=False, follow_redirects=True, timeout=10.0) as client:
-            for feed_source in NEWS_SOURCES:
-                if selected_source_types and feed_source["source_type"] not in selected_source_types:
-                    continue
-
-                try:
-                    logger.info("Fetching news from: %s", feed_source["label"])
-                    response = client.get(feed_source["url"], headers={"User-Agent": USER_AGENT})
-
-                    if response.status_code != 200:
-                        logger.warning("Failed to fetch %s: HTTP %s", feed_source["url"], response.status_code)
-                        continue
-
-                    feed = feedparser.parse(response.text)
-                    for entry in feed.entries[:8]:
-                        published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-                        published_dt = (
-                            datetime.fromtimestamp(time.mktime(published_parsed)) if published_parsed else datetime.now()
-                        )
-
-                        title = entry.get("title", "Untitled")
-                        link = entry.get("link", feed_source["url"])
-                        summary = entry.get("summary", "")
-
-                        # Deduplicate
-                        content_hash = self._content_hash(title, link)
-                        if content_hash in seen_hashes:
-                            continue
-                        seen_hashes.add(content_hash)
-
-                        relevance_score = self.get_relevance_score(title, summary, feed_source["trust"])
-                        sentiment = self.get_sentiment(f"{title} {summary}")
-                        signal_score = self.get_signal_score(relevance_score, sentiment)
-                        prediction = self.predict_market_impact(signal_score)
-                        credibility = self.get_credibility_score(
-                            f"{title} {summary}", feed_source["trust"]
-                        )
-
-                        all_articles.append(
-                            {
-                                "title": title,
-                                "link": link,
-                                "summary": summary,
-                                "source": feed_source["label"],
-                                "source_type": feed_source["source_type"],
-                                "published_at": published_dt,
-                                "sentiment": sentiment,
-                                "relevance_score": relevance_score,
-                                "signal_score": signal_score,
-                                "prediction": prediction,
-                                "credibility_score": credibility,
-                            }
-                        )
-                except Exception as error:
-                    logger.error("Error fetching RSS %s: %s", feed_source["url"], error)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error("Feed fetch error: %s", result)
+                continue
+            for article in result:
+                content_hash = self._content_hash(article["title"], article["link"])
+                if content_hash not in seen_hashes:
+                    seen_hashes.add(content_hash)
+                    all_articles.append(article)
 
         if not all_articles:
-            logger.warning("No articles fetched from selected sources. Returning fallback data.")
-            all_articles = [
-                {
-                    "title": "Macro sentiment mixed as investors await central bank commentary",
-                    "link": "https://finance.yahoo.com",
-                    "summary": "Market participants are assessing inflation signals and earnings guidance before placing directional bets.",
-                    "source": "Fallback Feed",
-                    "source_type": "market",
-                    "published_at": datetime.now(),
-                    "sentiment": "Neutral",
-                    "relevance_score": 0.71,
-                    "signal_score": 0.23,
-                    "prediction": "Watch",
-                    "credibility_score": 0.80,
-                },
-                {
-                    "title": "Tech momentum builds after stronger-than-expected software earnings",
-                    "link": "https://www.cnbc.com",
-                    "summary": "AI and enterprise software stocks gained after multiple firms issued improved forward guidance.",
-                    "source": "Fallback Feed",
-                    "source_type": "blog",
-                    "published_at": datetime.now(),
-                    "sentiment": "Positive",
-                    "relevance_score": 0.82,
-                    "signal_score": 0.50,
-                    "prediction": "Bullish",
-                    "credibility_score": 0.85,
-                },
-            ]
+            all_articles = self._fallback_articles()
 
         all_articles.sort(key=lambda item: item["published_at"], reverse=True)
 
@@ -305,6 +335,47 @@ class NewsService:
         ]
 
         return filtered
+
+    def _fallback_articles(
+        self,
+        min_relevance: float = 0.0,
+        only_actionable: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Return minimal fallback data when no feeds respond."""
+        logger.warning("No articles fetched. Returning fallback data.")
+        articles = [
+            {
+                "title": "Macro sentiment mixed as investors await central bank commentary",
+                "link": "https://finance.yahoo.com",
+                "summary": "Market participants are assessing inflation signals and earnings guidance before placing directional bets.",
+                "source": "Fallback Feed",
+                "source_type": "market",
+                "published_at": datetime.now(),
+                "sentiment": "Neutral",
+                "relevance_score": 0.71,
+                "signal_score": 0.23,
+                "prediction": "Watch",
+                "credibility_score": 0.80,
+            },
+            {
+                "title": "Tech momentum builds after stronger-than-expected software earnings",
+                "link": "https://www.cnbc.com",
+                "summary": "AI and enterprise software stocks gained after multiple firms issued improved forward guidance.",
+                "source": "Fallback Feed",
+                "source_type": "blog",
+                "published_at": datetime.now(),
+                "sentiment": "Positive",
+                "relevance_score": 0.82,
+                "signal_score": 0.50,
+                "prediction": "Bullish",
+                "credibility_score": 0.85,
+            },
+        ]
+        return [
+            a for a in articles
+            if a["relevance_score"] >= min_relevance
+            and (not only_actionable or a["prediction"] != "Watch")
+        ]
 
 
 news_service = NewsService()

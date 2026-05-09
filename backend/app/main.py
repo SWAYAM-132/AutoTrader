@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,12 +11,43 @@ from app.db.session import init_db
 
 logger = logging.getLogger(__name__)
 
+# Background task handle
+_news_refresh_task = None
+
+
+async def _periodic_news_refresh(interval_seconds: int = 300):
+    """Background task to keep the news cache warm. Runs every 5 minutes."""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            from app.services.news import news_service
+            articles = await news_service.fetch_latest_news_async(min_relevance=0.15)
+            logger.info("Background news refresh: %d articles cached", len(articles))
+
+            # Also re-ingest into RAG store
+            from app.services.rag import rag_service
+            count = rag_service.ingest_news_from_service()
+            logger.info("Background RAG re-ingest: %d documents", count)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Background news refresh error (non-fatal): %s", e)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
+    global _news_refresh_task
+
     # Initialize database tables
     await init_db()
+
+    # Seed demo user with rich portfolio (idempotent)
+    try:
+        from app.db.init_data import seed_demo_user
+        await seed_demo_user()
+    except Exception as e:
+        logger.warning("Demo user seed failed (non-fatal): %s", e)
 
     # Auto-ingest news into RAG store on startup
     try:
@@ -25,7 +57,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Startup RAG ingest failed (non-fatal): %s", e)
 
+    # Pre-warm news cache in background (non-blocking startup)
+    try:
+        from app.services.news import news_service
+        asyncio.create_task(news_service.fetch_latest_news_async(min_relevance=0.15))
+        logger.info("Startup news cache warm-up scheduled")
+    except Exception as e:
+        logger.warning("Startup news warm-up failed (non-fatal): %s", e)
+
+    # Start periodic background refresh
+    _news_refresh_task = asyncio.create_task(_periodic_news_refresh())
+
     yield
+
+    # Shutdown: cancel background task
+    if _news_refresh_task:
+        _news_refresh_task.cancel()
+        try:
+            await _news_refresh_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

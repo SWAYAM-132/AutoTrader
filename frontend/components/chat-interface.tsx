@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Bot, User, Loader2 } from "lucide-react"
-import api from "@/lib/api"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -15,6 +14,8 @@ interface Message {
     role: "user" | "ai"
     content: string
 }
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 export function ChatInterface() {
     const [messages, setMessages] = useState<Message[]>([
@@ -30,25 +31,82 @@ export function ChatInterface() {
         }
     }, [messages])
 
-    const handleSend = async () => {
-        if (!input.trim()) return
+    const handleSend = useCallback(async () => {
+        if (!input.trim() || isLoading) return
 
         const userMessage: Message = { role: "user", content: input }
         setMessages(prev => [...prev, userMessage])
         setInput("")
         setIsLoading(true)
 
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
         try {
-            const response = await api.post("/advisor/chat", { query: userMessage.content })
-            const aiMessage: Message = { role: "ai", content: response.data.response }
-            setMessages(prev => [...prev, aiMessage])
+            // Try streaming endpoint first for faster perceived response
+            const response = await fetch(`${API_URL}/advisor/chat/stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ query: userMessage.content }),
+            })
+
+            if (response.ok && response.body) {
+                // Streaming mode — show tokens as they arrive
+                const reader = response.body.getReader()
+                const decoder = new TextDecoder()
+                let aiContent = ""
+
+                // Add empty AI message that we'll update incrementally
+                setMessages(prev => [...prev, { role: "ai", content: "" }])
+
+                while (true) {
+                    const { done, value } = await reader.read()
+                    if (done) break
+
+                    const text = decoder.decode(value, { stream: true })
+                    // Parse SSE format: "data: <content>\n\n"
+                    const lines = text.split('\n')
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6)
+                            if (data === '[DONE]') break
+                            aiContent += data
+                            // Update the last message in-place
+                            setMessages(prev => {
+                                const updated = [...prev]
+                                updated[updated.length - 1] = { role: "ai", content: aiContent }
+                                return updated
+                            })
+                        }
+                    }
+                }
+            } else {
+                // Fallback to non-streaming endpoint
+                const fallbackResponse = await fetch(`${API_URL}/advisor/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                    },
+                    body: JSON.stringify({ query: userMessage.content }),
+                })
+
+                if (fallbackResponse.ok) {
+                    const data = await fallbackResponse.json()
+                    setMessages(prev => [...prev, { role: "ai", content: data.response }])
+                } else {
+                    throw new Error(`HTTP ${fallbackResponse.status}`)
+                }
+            }
         } catch (error) {
             console.error(error)
             setMessages(prev => [...prev, { role: "ai", content: "Sorry, I encountered an error. Please try again." }])
         } finally {
             setIsLoading(false)
         }
-    }
+    }, [input, isLoading])
 
     return (
         <Card className="h-[600px] flex flex-col glass-card border-white/10 shadow-2xl relative overflow-hidden">
@@ -112,7 +170,7 @@ export function ChatInterface() {
                                 )}
                             </div>
                         ))}
-                        {isLoading && (
+                        {isLoading && messages[messages.length - 1]?.role !== "ai" && (
                             <div className="flex gap-3 justify-start items-center">
                                 <Avatar className="h-9 w-9 border-2 border-primary/20 animate-pulse">
                                     <AvatarFallback>AI</AvatarFallback>

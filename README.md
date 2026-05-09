@@ -16,7 +16,7 @@ AutoTraderX/
 │   ├── fine_tuning/       # QLoRA fine-tuning scripts (GPU required)
 │   ├── Dockerfile
 │   └── requirements.txt
-├── frontend/              # Next.js 14 dashboard
+├── frontend/              # Next.js 16 dashboard
 │   ├── app/               # Pages (dashboard, login, signup)
 │   ├── components/        # UI components (chat, portfolio, news, etc.)
 │   ├── lib/               # API client
@@ -62,6 +62,7 @@ docker compose ps
 | `/api/v1/market/sentiment/{sym}`  | GET    | Price + sentiment for ticker   |
 | `/api/v1/news/latest`             | GET    | Latest financial news          |
 | `/api/v1/advisor/chat`            | POST   | AI advisor chat (auth required)|
+| `/api/v1/advisor/chat/stream`     | POST   | Streaming AI chat (SSE)        |
 | `/api/v1/db/tables`              | GET    | List database tables           |
 | `/api/v1/db/tables/{name}`        | GET    | View table data (paginated)    |
 | `/api/v1/db/rag/stats`           | GET    | RAG vector store statistics    |

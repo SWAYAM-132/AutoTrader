@@ -9,6 +9,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _hf_llm = None
+_groq_llm = None
 
 
 def _get_hf_llm():
@@ -53,15 +54,20 @@ def _get_hf_llm():
 
 
 def _get_groq_llm() -> ChatGroq:
-    """Returns a configured ChatGroq instance (Llama 3.3 70B via Groq API)."""
+    """Returns a cached, configured ChatGroq instance (Llama 3.3 70B via Groq API)."""
+    global _groq_llm
+    if _groq_llm is not None:
+        return _groq_llm
+
     if not settings.GROQ_API_KEY:
         logger.warning("GROQ_API_KEY not found in settings. LLM calls will fail.")
 
-    return ChatGroq(
+    _groq_llm = ChatGroq(
         temperature=0,
         model_name="llama-3.3-70b-versatile",
         groq_api_key=settings.GROQ_API_KEY or "placeholder",
     )
+    return _groq_llm
 
 
 def get_llm():
